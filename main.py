@@ -79,33 +79,24 @@ def print_tasks(tasks: List[Dict]) -> None:
             print(_wrap(body[:200] + ("..." if len(body) > 200 else ""), indent="     "))
 
 
-def print_threads(threads: List[Dict]) -> None:
+def print_emails(emails: List[Dict]) -> None:
     print(f"\n{_sep()}")
-    print(f"  メールスレッド ({len(threads)} 件)")
+    print(f"  メール履歴 ({len(emails)} 件、新しい順)")
     print(_sep())
-    for i, thread in enumerate(threads, 1):
-        thread_id = thread.get("id", "")
-        subject = thread.get("subject") or "(件名なし)"
-        status = thread.get("status") or ""
-        updated = _ts(thread.get("updatedAt"))
-        print(f"\n[{i}] ID: {thread_id}")
-        print(f"     件名: {subject}")
-        print(f"     状態: {status}  最終更新: {updated}")
-
-
-def print_messages(messages: List[Dict]) -> None:
-    print(f"\n{_sep()}")
-    print("  メッセージ履歴 (新しい順)")
-    print(_sep())
-    for msg in messages:
-        msg_id = msg.get("id", "")
-        msg_type = msg.get("type", "")
-        sender = msg.get("senderActorId", "")
-        created = _ts(msg.get("createdAt"))
-        text = msg.get("text") or ""
-        print(f"\n  [{created}] type={msg_type}  sender={sender}  id={msg_id}")
-        if text:
-            print(_wrap(text[:400] + ("..." if len(text) > 400 else "")))
+    for i, email in enumerate(emails, 1):
+        props = email.get("properties", {})
+        subject = props.get("hs_email_subject") or "(件名なし)"
+        direction = props.get("hs_email_direction") or ""
+        from_email = props.get("hs_email_from_email") or ""
+        to_email = props.get("hs_email_to_email") or ""
+        ts = _ts(props.get("hs_timestamp"))
+        arrow = "→" if "OUTGOING" in direction else "←"
+        print(f"\n[{i}] {arrow} {subject}")
+        print(f"     日時: {ts}")
+        print(f"     From: {from_email}  To: {to_email}")
+        body = props.get("hs_email_text") or ""
+        if body:
+            print(_wrap(body[:300] + ("..." if len(body) > 300 else ""), indent="     "))
 
 
 # ------------------------------------------------------------------ #
@@ -191,57 +182,48 @@ def select_contact(client: HubSpotClient, task: Dict) -> Optional[Tuple[str, str
             return None
 
 
-def select_thread(client: HubSpotClient, contact_id: str) -> Optional[Dict]:
-    """コンタクトのメールスレッド一覧を表示して選択させる。"""
-    print(f"\nコンタクト {contact_id} のメールスレッドを取得中...")
-    threads = client.get_threads_by_contact(contact_id, thread_status="OPEN", limit=5)
-    if not threads:
-        # OPENがなければCLOSEDも確認
-        threads = client.get_threads_by_contact(contact_id, thread_status="CLOSED", limit=5)
-    if not threads:
-        print("メールスレッドが見つかりませんでした。")
-        return None
-
-    print_threads(threads)
-    choice = _input(f"スレッド番号を選択 (1-{len(threads)}, q=戻る)")
-    if choice.lower() == "q":
-        return None
-    try:
-        idx = int(choice) - 1
-        return threads[idx]
-    except (ValueError, IndexError):
-        print("無効な番号です。")
-        return None
-
-
-def show_messages_and_reply(client: HubSpotClient, thread: dict) -> None:
-    """メッセージ履歴を表示して、返信するか確認する。"""
-    thread_id = thread["id"]
-    print(f"\nスレッド {thread_id} のメッセージを取得中...")
-    messages = client.get_thread_messages(thread_id, limit=10)
-    if not messages:
-        print("メッセージが見つかりませんでした。")
+def show_emails_and_log_reply(
+    client: HubSpotClient,
+    contact_id: str,
+    contact_name: str,
+    owner_id: Optional[str],
+) -> None:
+    """メール履歴を表示して、返信をHubSpotに記録する。"""
+    print(f"\nコンタクト {contact_id} のメール履歴を取得中...")
+    emails = client.get_contact_emails(contact_id, limit=10)
+    if not emails:
+        print("メール履歴が見つかりませんでした。")
         return
 
-    print_messages(messages)
-
-    # 最新メッセージから送信者情報・チャンネル情報を取得
-    latest = messages[0]
-    sender_actor_id = latest.get("senderActorId", "")
-    channel_id = str(latest.get("channelId") or "")
-    channel_account_id = str(latest.get("channelAccountId") or "")
-
-    # 返信先: 最新メッセージの送信者にTO返信
-    recipients_from_msg = latest.get("recipients", [])
+    print_emails(emails)
 
     print(f"\n{_sep()}")
-    choice = _input("このスレッドに返信しますか? (y/n)")
+    choice = _input("このコンタクトへの返信をHubSpotに記録しますか? (y/n)")
     if choice.lower() != "y":
-        print("返信をキャンセルしました。")
+        print("記録をキャンセルしました。")
         return
 
-    # 返信内容の入力
-    print("\n返信本文を入力してください (入力完了: 空行で終了):")
+    # 最新メールから件名・返信先アドレスを推定
+    latest_props = emails[0].get("properties", {})
+    latest_subject = latest_props.get("hs_email_subject") or ""
+    default_to = latest_props.get("hs_email_from_email") or ""
+    direction = latest_props.get("hs_email_direction") or ""
+    # 自分が送ったメールなら to_email が相手
+    if "OUTGOING" in direction:
+        default_to = latest_props.get("hs_email_to_email") or default_to
+
+    from_email = _input("自分のメールアドレス (Fromに使用)")
+    to_email_input = _input(f"返信先アドレス (Enter でそのまま: {default_to})")
+    to_email = to_email_input if to_email_input else default_to
+
+    subject = latest_subject
+    if subject and not subject.startswith("Re:"):
+        subject = f"Re: {subject}"
+    subject_input = _input(f"件名 (Enter でそのまま: {subject})")
+    if subject_input:
+        subject = subject_input
+
+    print("\n返信本文を入力してください (空行で終了):")
     lines = []
     while True:
         line = input()
@@ -250,52 +232,24 @@ def show_messages_and_reply(client: HubSpotClient, thread: dict) -> None:
         lines.append(line)
     reply_text = "\n".join(lines).strip()
     if not reply_text:
-        print("本文が空のため返信をキャンセルしました。")
+        print("本文が空のため記録をキャンセルしました。")
         return
 
-    # 受信者の設定
-    # スレッド内の相手(送信者)にTOで返信する
-    if recipients_from_msg:
-        # 既存受信者をそのまま利用
-        reply_recipients = [
-            {**r, "recipientField": "TO"}
-            for r in recipients_from_msg
-            if r.get("recipientField") != "FROM"
-        ]
-    else:
-        # フォールバック: 手動入力
-        to_email = _input("返信先メールアドレスを入力")
-        to_name = _input("返信先名前を入力 (省略可)")
-        reply_recipients = [
-            {
-                "recipientField": "TO",
-                "deliveryIdentifiers": [
-                    {"type": "HS_EMAIL_ADDRESS", "value": to_email}
-                ],
-            }
-        ]
-        if to_name:
-            reply_recipients[0]["name"] = to_name
-
-    subject = thread.get("subject") or ""
-    if subject and not subject.startswith("Re:"):
-        subject = f"Re: {subject}"
-
-    print("\n送信中...")
+    print("\nHubSpotに記録中...")
     try:
-        result = client.reply_to_thread(
-            thread_id=thread_id,
+        result = client.log_email(
+            contact_id=contact_id,
+            from_email=from_email,
+            to_email=to_email,
+            subject=subject,
             text=reply_text,
-            sender_actor_id=sender_actor_id,
-            channel_id=channel_id,
-            channel_account_id=channel_account_id,
-            recipients=reply_recipients,
-            subject=subject or None,
+            owner_id=owner_id,
         )
-        msg_id = result.get("id", "")
-        print(f"\n返信を送信しました! (メッセージID: {msg_id})")
+        email_id = result.get("id", "")
+        print(f"\nHubSpotに記録しました! (メールID: {email_id})")
+        print("※ 実際の送信はGmailから行ってください。")
     except Exception as e:
-        print(f"\n送信エラー: {e}")
+        print(f"\n記録エラー: {e}")
 
 
 # ------------------------------------------------------------------ #
@@ -335,13 +289,8 @@ def main() -> None:
         contact_id, contact_name = result
         print(f"\n選択したコンタクト: {contact_name} (ID: {contact_id})")
 
-        # 3. スレッド選択
-        thread = select_thread(client, contact_id)
-        if thread is None:
-            continue
-
-        # 4. メッセージ表示・返信
-        show_messages_and_reply(client, thread)
+        # 3. メール履歴表示・返信記録
+        show_emails_and_log_reply(client, contact_id, contact_name, owner_id)
 
         # 続けるか確認
         again = _input("\n別のタスクを確認しますか? (y/n)")

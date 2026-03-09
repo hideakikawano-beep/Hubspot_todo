@@ -97,71 +97,85 @@ class HubSpotClient:
         )
 
     # ------------------------------------------------------------------ #
-    # Conversations (Email Threads)
+    # CRM Emails (Gmail連携などのメールEngagement)
     # ------------------------------------------------------------------ #
 
-    def get_threads_by_contact(
-        self, contact_id: str, thread_status: str = "OPEN", limit: int = 5
-    ) -> List[Dict]:
-        """コンタクトに紐づくメールスレッド一覧を取得する。
+    EMAIL_PROPERTIES = [
+        "hs_email_subject",
+        "hs_email_text",
+        "hs_email_html",
+        "hs_email_from_email",
+        "hs_email_from_firstname",
+        "hs_email_from_lastname",
+        "hs_email_to_email",
+        "hs_email_to_firstname",
+        "hs_email_to_lastname",
+        "hs_email_status",
+        "hs_email_direction",
+        "hs_timestamp",
+    ]
 
-        Args:
-            contact_id: HubSpotのコンタクトID
-            thread_status: "OPEN" | "CLOSED"
-            limit: 取得件数
-        """
-        data = self._get(
-            "/conversations/v3/conversations/threads",
-            params={
-                "associatedContactId": contact_id,
-                "threadStatus": thread_status,
-                "limit": limit,
-            },
+    def get_contact_emails(self, contact_id: str, limit: int = 10) -> List[Dict]:
+        """コンタクトに紐づくメールEngagementを新しい順に取得する。"""
+        # まずアソシエーションからメールIDを取得
+        assoc = self._get(
+            f"/crm/v3/objects/contacts/{contact_id}/associations/emails"
         )
-        return data.get("results", [])
+        email_ids = [r.get("id") or r.get("toObjectId") for r in assoc.get("results", [])]
+        if not email_ids:
+            return []
 
-    def get_thread_messages(self, thread_id: str, limit: int = 10) -> List[Dict]:
-        """スレッド内のメッセージ一覧を取得する(新しい順)。"""
-        data = self._get(
-            f"/conversations/v3/conversations/threads/{thread_id}/messages",
-            params={"limit": limit},
+        # バッチ取得
+        batch_ids = [{"id": str(eid)} for eid in email_ids[:limit]]
+        data = self._post(
+            "/crm/v3/objects/emails/batch/read",
+            {"inputs": batch_ids, "properties": self.EMAIL_PROPERTIES},
         )
-        return data.get("results", [])
+        emails = data.get("results", [])
+        # hs_timestamp 降順ソート
+        emails.sort(
+            key=lambda e: e.get("properties", {}).get("hs_timestamp") or "",
+            reverse=True,
+        )
+        return emails
 
-    def reply_to_thread(
+    def log_email(
         self,
-        thread_id: str,
+        contact_id: str,
+        from_email: str,
+        to_email: str,
+        subject: str,
         text: str,
-        sender_actor_id: str,
-        channel_id: str,
-        channel_account_id: str,
-        recipients: List[Dict],
-        subject: Optional[str] = None,
+        owner_id: Optional[str] = None,
     ) -> dict:
-        """スレッドにメールを返信する。
+        """送信メールをCRMにEngagementとして記録し、コンタクトに紐づける。
 
-        Args:
-            thread_id: 返信先スレッドID
-            text: 本文 (HTMLも可)
-            sender_actor_id: 送信者アクターID (例: "A-12345678")
-            channel_id: チャンネルID (例: "1002")
-            channel_account_id: チャンネルアカウントID
-            recipients: 受信者リスト
-                [{"actorID": "...", "name": "...", "recipientField": "TO",
-                  "deliveryIdentifiers": [{"type": "HS_EMAIL_ADDRESS", "value": "..."}]}]
-            subject: 件名 (省略可)
+        Note: 実際の送信はGmail側で行い、このAPIはHubSpotへの記録用。
         """
-        body: Dict = {
-            "type": "MESSAGE",
-            "text": text,
-            "senderActorId": sender_actor_id,
-            "channelId": channel_id,
-            "channelAccountId": channel_account_id,
-            "recipients": recipients,
+        props: Dict = {
+            "hs_email_direction": "OUTGOING_EMAIL",
+            "hs_email_status": "SENT",
+            "hs_email_subject": subject,
+            "hs_email_text": text,
+            "hs_email_from_email": from_email,
+            "hs_email_to_email": to_email,
+            "hs_timestamp": str(int(__import__("time").time() * 1000)),
         }
-        if subject:
-            body["subject"] = subject
+        if owner_id:
+            props["hubspot_owner_id"] = owner_id
 
-        return self._post(
-            f"/conversations/v3/conversations/threads/{thread_id}/messages", body
-        )
+        body: Dict = {
+            "properties": props,
+            "associations": [
+                {
+                    "to": {"id": contact_id},
+                    "types": [
+                        {
+                            "associationCategory": "HUBSPOT_DEFINED",
+                            "associationTypeId": 198,  # email -> contact
+                        }
+                    ],
+                }
+            ],
+        }
+        return self._post("/crm/v3/objects/emails", body)
