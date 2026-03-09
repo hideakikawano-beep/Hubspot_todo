@@ -7,7 +7,7 @@ HubSpot API クライアント
 
 import os
 import requests
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 BASE_URL = "https://api.hubapi.com"
@@ -21,12 +21,12 @@ class HubSpotClient:
             "Content-Type": "application/json",
         })
 
-    def _get(self, path: str, params: dict = None) -> dict:
+    def _get(self, path: str, params: Dict = None) -> Dict:
         resp = self.session.get(f"{BASE_URL}{path}", params=params)
         resp.raise_for_status()
         return resp.json()
 
-    def _post(self, path: str, body: dict) -> dict:
+    def _post(self, path: str, body: Dict) -> Dict:
         resp = self.session.post(f"{BASE_URL}{path}", json=body)
         resp.raise_for_status()
         return resp.json()
@@ -35,7 +35,7 @@ class HubSpotClient:
     # Tasks (Todo)
     # ------------------------------------------------------------------ #
 
-    def get_tasks(self, limit: int = 10, status: Optional[str] = None) -> list[dict]:
+    def get_tasks(self, limit: int = 10, status: Optional[str] = None) -> List[Dict]:
         """直近のTodoタスク一覧を取得する。
 
         Args:
@@ -82,7 +82,7 @@ class HubSpotClient:
 
         return data.get("results", [])
 
-    def get_task_associations(self, task_id: str, to_object_type: str) -> list[dict]:
+    def get_task_associations(self, task_id: str, to_object_type: str) -> List[Dict]:
         """タスクに紐づくオブジェクト(contacts/deals/companies)を取得する。"""
         data = self._get(
             f"/crm/v3/objects/tasks/{task_id}/associations/{to_object_type}"
@@ -106,7 +106,7 @@ class HubSpotClient:
 
     def get_threads_by_contact(
         self, contact_id: str, thread_status: str = "OPEN", limit: int = 5
-    ) -> list[dict]:
+    ) -> List[Dict]:
         """コンタクトに紐づくメールスレッド一覧を取得する。
 
         Args:
@@ -124,7 +124,7 @@ class HubSpotClient:
         )
         return data.get("results", [])
 
-    def get_thread_messages(self, thread_id: str, limit: int = 10) -> list[dict]:
+    def get_thread_messages(self, thread_id: str, limit: int = 10) -> List[Dict]:
         """スレッド内のメッセージ一覧を取得する(新しい順)。"""
         data = self._get(
             f"/conversations/v3/conversations/threads/{thread_id}/messages",
@@ -139,7 +139,7 @@ class HubSpotClient:
         sender_actor_id: str,
         channel_id: str,
         channel_account_id: str,
-        recipients: list[dict],
+        recipients: List[Dict],
         subject: Optional[str] = None,
     ) -> dict:
         """スレッドにメールを返信する。
@@ -155,7 +155,7 @@ class HubSpotClient:
                   "deliveryIdentifiers": [{"type": "HS_EMAIL_ADDRESS", "value": "..."}]}]
             subject: 件名 (省略可)
         """
-        body: dict = {
+        body: Dict = {
             "type": "MESSAGE",
             "text": text,
             "senderActorId": sender_actor_id,

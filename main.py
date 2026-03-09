@@ -16,6 +16,7 @@ import os
 import sys
 import textwrap
 from datetime import datetime, timezone
+from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
@@ -29,7 +30,7 @@ load_dotenv()
 # ------------------------------------------------------------------ #
 
 
-def _ts(iso: str | None) -> str:
+def _ts(iso: Optional[str]) -> str:
     """ISO8601タイムスタンプを読みやすい日本語形式に変換する。"""
     if not iso:
         return "不明"
@@ -61,7 +62,7 @@ def _input(prompt: str) -> str:
 # ------------------------------------------------------------------ #
 
 
-def print_tasks(tasks: list[dict]) -> None:
+def print_tasks(tasks: List[Dict]) -> None:
     print(f"\n{_sep('=')}")
     print(f"  直近のTodoタスク ({len(tasks)} 件)")
     print(_sep("="))
@@ -78,7 +79,7 @@ def print_tasks(tasks: list[dict]) -> None:
             print(_wrap(body[:200] + ("..." if len(body) > 200 else ""), indent="     "))
 
 
-def print_threads(threads: list[dict]) -> None:
+def print_threads(threads: List[Dict]) -> None:
     print(f"\n{_sep()}")
     print(f"  メールスレッド ({len(threads)} 件)")
     print(_sep())
@@ -92,7 +93,7 @@ def print_threads(threads: list[dict]) -> None:
         print(f"     状態: {status}  最終更新: {updated}")
 
 
-def print_messages(messages: list[dict]) -> None:
+def print_messages(messages: List[Dict]) -> None:
     print(f"\n{_sep()}")
     print("  メッセージ履歴 (新しい順)")
     print(_sep())
@@ -112,7 +113,7 @@ def print_messages(messages: list[dict]) -> None:
 # ------------------------------------------------------------------ #
 
 
-def select_task(client: HubSpotClient) -> dict | None:
+def select_task(client: HubSpotClient) -> Optional[Dict]:
     """タスク一覧を表示して選択させる。"""
     print("\nTodoタスクを取得中...")
     tasks = client.get_tasks(limit=10, status="WAITING")
@@ -135,7 +136,7 @@ def select_task(client: HubSpotClient) -> dict | None:
         return None
 
 
-def select_contact(client: HubSpotClient, task: dict) -> tuple[str, str] | None:
+def select_contact(client: HubSpotClient, task: Dict) -> Optional[Tuple[str, str]]:
     """タスクに紐づくコンタクトを取得して選択させる。"""
     task_id = task["id"]
     print(f"\nタスク {task_id} のコンタクトを取得中...")
@@ -183,7 +184,7 @@ def select_contact(client: HubSpotClient, task: dict) -> tuple[str, str] | None:
             return None
 
 
-def select_thread(client: HubSpotClient, contact_id: str) -> dict | None:
+def select_thread(client: HubSpotClient, contact_id: str) -> Optional[Dict]:
     """コンタクトのメールスレッド一覧を表示して選択させる。"""
     print(f"\nコンタクト {contact_id} のメールスレッドを取得中...")
     threads = client.get_threads_by_contact(contact_id, thread_status="OPEN", limit=5)
