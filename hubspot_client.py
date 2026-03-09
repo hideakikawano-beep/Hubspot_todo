@@ -35,12 +35,20 @@ class HubSpotClient:
     # Tasks (Todo)
     # ------------------------------------------------------------------ #
 
-    def get_tasks(self, limit: int = 10, status: Optional[str] = None) -> List[Dict]:
+    def get_tasks(
+        self,
+        limit: int = 10,
+        status: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        from_ts: Optional[int] = None,
+    ) -> List[Dict]:
         """直近のTodoタスク一覧を取得する。
 
         Args:
             limit: 取得件数 (最大100)
             status: "WAITING" | "IN_PROGRESS" | "COMPLETED" | None(全て)
+            owner_id: HubSpotオーナーID (自分のタスクのみ取得する場合)
+            from_ts: この日時(ミリ秒)以降のタスクのみ取得
         """
         properties = [
             "hs_task_subject",
@@ -52,33 +60,21 @@ class HubSpotClient:
             "hubspot_owner_id",
         ]
 
+        filters = []
         if status:
-            body = {
-                "filterGroups": [
-                    {
-                        "filters": [
-                            {
-                                "propertyName": "hs_task_status",
-                                "operator": "EQ",
-                                "value": status,
-                            }
-                        ]
-                    }
-                ],
-                "properties": properties,
-                "limit": limit,
-                "sorts": [{"propertyName": "hs_timestamp", "direction": "DESCENDING"}],
-            }
-            data = self._post("/crm/v3/objects/tasks/search", body)
-        else:
-            data = self._get(
-                "/crm/v3/objects/tasks",
-                params={
-                    "limit": limit,
-                    "properties": ",".join(properties),
-                    "sort": "-hs_timestamp",
-                },
-            )
+            filters.append({"propertyName": "hs_task_status", "operator": "EQ", "value": status})
+        if owner_id:
+            filters.append({"propertyName": "hubspot_owner_id", "operator": "EQ", "value": owner_id})
+        if from_ts is not None:
+            filters.append({"propertyName": "hs_timestamp", "operator": "GTE", "value": str(from_ts)})
+
+        body = {
+            "filterGroups": [{"filters": filters}] if filters else [],
+            "properties": properties,
+            "limit": limit,
+            "sorts": [{"propertyName": "hs_timestamp", "direction": "ASCENDING"}],
+        }
+        data = self._post("/crm/v3/objects/tasks/search", body)
 
         return data.get("results", [])
 

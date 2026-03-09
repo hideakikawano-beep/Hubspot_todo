@@ -15,7 +15,7 @@ HubSpot Todo メールスレッド確認・返信ツール
 import os
 import sys
 import textwrap
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
@@ -113,13 +113,20 @@ def print_messages(messages: List[Dict]) -> None:
 # ------------------------------------------------------------------ #
 
 
-def select_task(client: HubSpotClient) -> Optional[Dict]:
+def _today_start_ms() -> int:
+    """今日の00:00:00 UTCをミリ秒で返す。"""
+    today = date.today()
+    dt = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+def select_task(client: HubSpotClient, owner_id: Optional[str] = None) -> Optional[Dict]:
     """タスク一覧を表示して選択させる。"""
     print("\nTodoタスクを取得中...")
-    tasks = client.get_tasks(limit=10, status="WAITING")
+    from_ts = _today_start_ms()
+    tasks = client.get_tasks(limit=20, status="NOT_STARTED", owner_id=owner_id, from_ts=from_ts)
     if not tasks:
-        # WAITING が空なら全ステータスで再取得
-        tasks = client.get_tasks(limit=10)
+        tasks = client.get_tasks(limit=20, owner_id=owner_id, from_ts=from_ts)
     if not tasks:
         print("タスクが見つかりませんでした。")
         return None
@@ -303,15 +310,20 @@ def main() -> None:
         print("  .env.example を .env にコピーしてトークンを設定してください。")
         sys.exit(1)
 
+    owner_id = os.getenv("HUBSPOT_OWNER_ID") or None
     client = HubSpotClient(token)
 
     print(_sep("="))
     print("  HubSpot Todo メールスレッド 確認・返信ツール")
     print(_sep("="))
+    if owner_id:
+        print(f"  フィルター: 自分 (OwnerID: {owner_id}) / 今日以降のタスク")
+    else:
+        print("  フィルター: 今日以降のタスク (HUBSPOT_OWNER_ID 未設定のため担当者フィルターなし)")
 
     while True:
         # 1. タスク選択
-        task = select_task(client)
+        task = select_task(client, owner_id=owner_id)
         if task is None:
             print("\n終了します。")
             break
